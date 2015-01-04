@@ -16,7 +16,8 @@ pub enum Error {
 
 #[derive(Show, Copy)]
 pub enum FormatError {
-    UnknownOption,
+    UnknownBlock(u32),
+    UnknownOption(u16),
     Utf8Error(Utf8Error)
 }
 
@@ -273,7 +274,7 @@ impl SectionHeaderBlock {
                         }
                     }
 
-                    _ => return Err(FromError::from_error(FormatError::UnknownOption))
+                    _ => return Err(FromError::from_error(FormatError::UnknownOption(code)))
                 };
 
                 options.push(opt);
@@ -330,7 +331,7 @@ impl InterfaceDescriptionBlock {
                     6 => MacAddr(try!(d.read_le_uint_n(6))),
                     9 => TsResolution(try!(d.read_byte())),
 
-                    _ => return Err(FromError::from_error(FormatError::UnknownOption))
+                    _ => return Err(FromError::from_error(FormatError::UnknownOption(code)))
                 };
 
                 options.push(opt);
@@ -374,7 +375,7 @@ impl EnhancedPacketBlock {
                     }
 
                     // TODO: rest of the options
-                    _ => return Err(FromError::from_error(FormatError::UnknownOption))
+                    _ => return Err(FromError::from_error(FormatError::UnknownOption(code)))
                 };
 
                 options.push(opt);
@@ -428,7 +429,7 @@ impl InterfaceStatisticsBlock {
                         }
                     }
 
-                    _ => return Err(FromError::from_error(FormatError::UnknownOption))
+                    _ => return Err(FromError::from_error(FormatError::UnknownOption(code)))
                 };
 
                 options.push(opt);
