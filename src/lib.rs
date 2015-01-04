@@ -193,9 +193,6 @@ pub struct EnhancedPacketBlock {
     pub interface_id: u32,
     pub timestamp: u64,
 
-    /// Number of bytes captured from the packet
-    pub captured_len: u32,
-
     /// Actual length of the packet when it was transmitted on the network
     pub len: u32,
 
@@ -456,7 +453,6 @@ impl EnhancedPacketBlock {
         Ok(EnhancedPacketBlock {
             interface_id: interface_id,
             timestamp: ts,
-            captured_len: cap_len,
             len: len,
             data: packet_data,
             options: options
