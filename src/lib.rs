@@ -267,9 +267,9 @@ pub struct PacketIter<'a> {
 pub struct SimpleReader<'a> {
     r: &'a mut (Reader + 'a),
 
-    pub interfaces: Vec<InterfaceDescriptionBlock>
+    interfaces: Vec<InterfaceDescriptionBlock>,
+    if_offset: uint
 }
-
 
 impl<'a> Iterator<Block> for BlockIter<'a> {
     fn next(&mut self) -> Option<Block> {
@@ -280,13 +280,32 @@ impl<'a> Iterator<Block> for BlockIter<'a> {
     }
 }
 
-impl<'a> Iterator<EnhancedPacketBlock> for PacketIter<'a> {
-    fn next(&mut self) -> Option<EnhancedPacketBlock> {
+pub type IterPacket<'a> = (&'a InterfaceDescriptionBlock, EnhancedPacketBlock);
+
+impl<'a> Iterator<IterPacket<'a>> for PacketIter<'a> {
+    fn next(&mut self) -> Option<IterPacket<'a>> {
         while let Ok(block) = read_block(self.r.r) {
             match block {
-                Block::SectionHeader(_) => self.r.interfaces.clear(),
+                Block::SectionHeader(_) => {
+                    // Each section is independent from another,
+                    // however we might still have live references
+                    // to the old interface descriptions so we
+                    // can't just clear the vector
+                    self.r.if_offset = self.r.interfaces.len()
+                },
+
                 Block::InterfaceDescription(id) => self.r.interfaces.push(id),
-                Block::EnhancedPacket(ep) => return Some(ep),
+
+                Block::EnhancedPacket(ep) => {
+                    let iface = &self.r.interfaces[self.r.if_offset + ep.interface_id as uint];
+                    unsafe {
+                        // The interface description should live as long as
+                        // SimpleReader, so this should be safe.
+                        let iface = std::mem::transmute(iface);
+                    
+                        return Some((iface, ep))
+                    }
+                },
                 _ => {}
             }
         }
@@ -297,7 +316,7 @@ impl<'a> Iterator<EnhancedPacketBlock> for PacketIter<'a> {
 
 impl<'a> SimpleReader<'a> {
     pub fn new(r: &mut Reader) -> SimpleReader {
-        SimpleReader { r: r, interfaces: Vec::new() }
+        SimpleReader { r: r, interfaces: Vec::new(), if_offset: 0}
     }
 
     pub fn blocks(&mut self) -> BlockIter {
