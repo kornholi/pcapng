@@ -39,7 +39,8 @@ impl FromError<FormatError> for Error {
     }
 }
 
-enum Block {
+#[derive(Show)]
+pub enum Block {
     SectionHeader(SectionHeaderBlock),
     InterfaceDescription(InterfaceDescriptionBlock),
     InterfaceStatistics(InterfaceStatisticsBlock),
@@ -217,7 +218,7 @@ fn dword_aligned(n: uint) -> uint {
     (n + 3) & !3
 }
 
-pub fn read_block(r: &mut Reader) -> Result<(u32, Vec<u8>), IoError> {
+pub fn read_raw_block(r: &mut Reader) -> Result<(u32, Vec<u8>), IoError> {
     let block_type = try!(r.read_le_u32());
 
     let total_len = try!(r.read_le_u32());
@@ -239,6 +240,76 @@ fn read_option(r: &mut Reader) -> Result<(u16, Vec<u8>), IoError> {
     data.truncate(len as uint);
 
     Ok((code, data))
+}
+
+pub fn read_block(r: &mut Reader) -> Result<Block, Error> {
+    use Block::*;
+
+    let (block_type, data) = try!(read_raw_block(r));
+    let mut r = BufReader::new(&*data);
+
+    let r = match block_type {
+        0x0A0D0D0A => SectionHeader(try!(SectionHeaderBlock::read(&mut r))),
+        1 => InterfaceDescription(try!(InterfaceDescriptionBlock::read(&mut r))),
+        5 => InterfaceStatistics(try!(InterfaceStatisticsBlock::read(&mut r))),
+        6 => EnhancedPacket(try!(EnhancedPacketBlock::read(&mut r))),
+        _ => return Err(FromError::from_error(FormatError::UnknownBlock(block_type)))
+    };
+
+    Ok(r)
+}
+
+pub struct BlockIter<'a> {
+    r: &'a mut (Reader + 'a)
+}
+
+pub struct PacketIter<'a> {
+    r: &'a mut SimpleReader<'a>
+}
+
+pub struct SimpleReader<'a> {
+    r: &'a mut (Reader + 'a),
+
+    pub interfaces: Vec<InterfaceDescriptionBlock>
+}
+
+
+impl<'a> Iterator<Block> for BlockIter<'a> {
+    fn next(&mut self) -> Option<Block> {
+        match read_block(self.r) {
+            Ok(block) => Some(block),
+            Err(_) => None
+        }
+    }
+}
+
+impl<'a> Iterator<EnhancedPacketBlock> for PacketIter<'a> {
+    fn next(&mut self) -> Option<EnhancedPacketBlock> {
+        while let Ok(block) = read_block(self.r.r) {
+            match block {
+                Block::SectionHeader(_) => self.r.interfaces.clear(),
+                Block::InterfaceDescription(id) => self.r.interfaces.push(id),
+                Block::EnhancedPacket(ep) => return Some(ep),
+                _ => {}
+            }
+        }
+
+        None
+    }
+}
+
+impl<'a> SimpleReader<'a> {
+    pub fn new(r: &mut Reader) -> SimpleReader {
+        SimpleReader { r: r, interfaces: Vec::new() }
+    }
+
+    pub fn blocks(&mut self) -> BlockIter {
+        BlockIter { r: self.r }
+    }
+
+    pub fn packets(&'a mut self) -> PacketIter<'a> {
+        PacketIter { r: self }
+    }
 }
 
 impl SectionHeaderBlock {
