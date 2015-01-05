@@ -1,4 +1,4 @@
-#![feature(slicing_syntax, globs)]
+#![feature(slicing_syntax, globs, associated_types)]
 
 use std::error::FromError;
 
@@ -271,7 +271,9 @@ pub struct SimpleReader<'a> {
     if_offset: uint
 }
 
-impl<'a> Iterator<Block> for BlockIter<'a> {
+impl<'a> Iterator for BlockIter<'a> {
+    type Item = Block;
+
     fn next(&mut self) -> Option<Block> {
         match read_block(self.r) {
             Ok(block) => Some(block),
@@ -280,9 +282,11 @@ impl<'a> Iterator<Block> for BlockIter<'a> {
     }
 }
 
-pub type IterPacket<'a> = (&'a InterfaceDescriptionBlock, EnhancedPacketBlock);
+type IterPacket<'a> = (&'a InterfaceDescriptionBlock, EnhancedPacketBlock);
 
-impl<'a> Iterator<IterPacket<'a>> for PacketIter<'a> {
+impl<'a> Iterator for PacketIter<'a> {
+    type Item = IterPacket<'a>;
+
     fn next(&mut self) -> Option<IterPacket<'a>> {
         while let Ok(block) = read_block(self.r.r) {
             match block {
