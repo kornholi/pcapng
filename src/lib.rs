@@ -1,5 +1,3 @@
-#![feature(slicing_syntax, globs, associated_types)]
-
 use std::error::FromError;
 
 use std::str::Utf8Error;
