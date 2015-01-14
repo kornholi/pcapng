@@ -209,30 +209,30 @@ pub enum EnhancedPacketBlockOption {
 }
 
 #[inline(always)]
-fn dword_aligned(n: uint) -> uint {
+fn dword_aligned(n: usize) -> usize {
     (n + 3) & !3
 }
 
 pub fn read_raw_block(r: &mut Reader) -> Result<(u32, Vec<u8>), IoError> {
     let block_type = try!(r.read_le_u32());
 
-    let total_len = try!(r.read_le_u32());
+    let total_len = try!(r.read_le_u32()) as usize;
     let data_len = total_len - 12; // 12 = type + 2*length
 
-    let mut data = try!(r.read_exact(dword_aligned(data_len as uint)));
-    data.truncate(data_len as uint);
+    let mut data = try!(r.read_exact(dword_aligned(data_len)));
+    data.truncate(data_len);
 
-    assert!(total_len == try!(r.read_le_u32()));
+    assert!(total_len == try!(r.read_le_u32()) as usize);
 
     Ok((block_type, data))
 }
 
 fn read_option(r: &mut Reader) -> Result<(u16, Vec<u8>), IoError> {
     let code = try!(r.read_le_u16());
-    let len = try!(r.read_le_u16()) as uint;
+    let len = try!(r.read_le_u16()) as usize;
 
     let mut data = try!(r.read_exact(dword_aligned(len)));
-    data.truncate(len as uint);
+    data.truncate(len);
 
     Ok((code, data))
 }
@@ -266,7 +266,7 @@ pub struct SimpleReader<'a> {
     r: &'a mut (Reader + 'a),
 
     interfaces: Vec<InterfaceDescriptionBlock>,
-    if_offset: uint
+    if_offset: usize
 }
 
 impl<'a> Iterator for BlockIter<'a> {
@@ -299,7 +299,7 @@ impl<'a> Iterator for PacketIter<'a> {
                 Block::InterfaceDescription(id) => self.r.interfaces.push(id),
 
                 Block::EnhancedPacket(ep) => {
-                    let iface = &self.r.interfaces[self.r.if_offset + ep.interface_id as uint];
+                    let iface = &self.r.interfaces[self.r.if_offset + ep.interface_id as usize];
                     unsafe {
                         // The interface description should live as long as
                         // SimpleReader, so this should be safe.
@@ -439,13 +439,13 @@ impl EnhancedPacketBlock {
     pub fn read(r: &mut BufReader) -> Result<EnhancedPacketBlock, Error> {
         let interface_id = try!(r.read_le_u32());
         let ts = try!(r.read_le_u64());
-        let cap_len = try!(r.read_le_u32());
+        let cap_len = try!(r.read_le_u32()) as usize;
         let len = try!(r.read_le_u32());
 
-        let aligned_len = dword_aligned(cap_len as uint);
+        let aligned_len = dword_aligned(cap_len);
 
         let mut packet_data = try!(r.read_exact(aligned_len));
-        packet_data.truncate(cap_len as uint);
+        packet_data.truncate(cap_len);
 
         let mut options = Vec::new();
 
