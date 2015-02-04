@@ -1,18 +1,20 @@
+#![feature(io)]
+
 use std::error::FromError;
 
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 
-use std::io::{Reader, BufReader, IoError};
-use std::io::net::ip::IpAddr;
+use std::old_io::{Reader, BufReader, IoError};
+use std::old_io::net::ip::IpAddr;
 
-#[derive(Show)]
+#[derive(Debug)]
 pub enum Error {
     Io(IoError),
     FormatError(FormatError)
 }
 
-#[derive(Show, Copy)]
+#[derive(Debug, Copy)]
 pub enum FormatError {
     UnknownBlock(u32),
     UnknownOption(u16),
@@ -37,7 +39,7 @@ impl FromError<FormatError> for Error {
     }
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub enum Block {
     SectionHeader(SectionHeaderBlock),
     InterfaceDescription(InterfaceDescriptionBlock),
@@ -45,7 +47,7 @@ pub enum Block {
     EnhancedPacket(EnhancedPacketBlock)
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct SectionHeaderBlock {
     /// Magic number equal to 0x1A2B3C4D. This field can be used to detect
     /// sections saved on systems with different endianness.
@@ -62,7 +64,7 @@ pub struct SectionHeaderBlock {
     pub options: Vec<SectionHeaderOption>
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub enum SectionHeaderOption {
     /// Comment associated with the current block
     Comment(String),
@@ -78,7 +80,7 @@ pub enum SectionHeaderOption {
 }
 
 /// Block type 1 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct InterfaceDescriptionBlock {
     /// Link layer type of the interface
     pub link_type: u16,
@@ -89,7 +91,7 @@ pub struct InterfaceDescriptionBlock {
     pub options: Vec<InterfaceDescriptionOption>
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub enum InterfaceDescriptionOption {
     /// Comment associated with the current block
     Comment(String),
@@ -149,7 +151,7 @@ pub enum InterfaceDescriptionOption {
 }
 
 /// Block type 5
-#[derive(Show)]
+#[derive(Debug)]
 pub struct InterfaceStatisticsBlock {
     pub interface_id: u32,
     pub timestamp: u64,
@@ -157,7 +159,7 @@ pub struct InterfaceStatisticsBlock {
     pub options: Vec<InterfaceStatisticsOption>
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub enum InterfaceStatisticsOption {
     /// Comment associated with the current block
     Comment(String),
@@ -186,7 +188,7 @@ pub enum InterfaceStatisticsOption {
     Delivered(u64)
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct EnhancedPacketBlock {
     pub interface_id: u32,
     pub timestamp: u64,
@@ -198,7 +200,7 @@ pub struct EnhancedPacketBlock {
     pub options: Vec<EnhancedPacketBlockOption>
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub enum EnhancedPacketBlockOption {
     Comment(String),
     Flags(u32),
