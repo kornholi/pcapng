@@ -9,13 +9,11 @@ Reading raw blocks:
 ```rust
 extern crate pcapng;
 
-use std::io::File;
-use std::path::Path;
-
+use std::fs::File;
 use pcapng::Block;
 
 fn main() {
-    let mut f = File::open(&Path::new("data.pcapng"));
+    let mut f = File::open("data.pcapng").unwrap();
     let mut r = pcapng::SimpleReader::new(&mut f);
 
     for block in r.blocks() {
@@ -35,14 +33,11 @@ Parsing packets with [libpnet](https://github.com/libpnet/libpnet):
 extern crate pcapng;
 extern crate pnet;
 
-use std::io::File;
-use std::path::Path;
-
-use pnet::packet::ethernet::{EthernetHeader, EthernetPacket};
+use std::fs::File;
+use pnet::packet::ethernet::EthernetPacket;
 
 fn main() {
-    let mut f = File::open(&Path::new("data.pcapng"));
-
+    let mut f = File::open("data.pcapng").unwrap();
     let mut r = pcapng::SimpleReader::new(&mut f);
 
     for (iface, ref packet) in r.packets() {
@@ -51,7 +46,7 @@ fn main() {
             continue
         }
 
-        let eh = EthernetHeader::new(&*packet.data);
+        let eh = EthernetPacket::new(&packet.data[..]);
 
         println!("Ethernet: {} -> {}", eh.get_source(), eh.get_destination());
     }
