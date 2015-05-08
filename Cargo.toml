@@ -4,3 +4,6 @@ name = "pcapng"
 version = "0.0.1"
 authors = ["Kornelijus Survila <kornholijo@gmail.com>"]
 license = "MIT"
+
+[dependencies]
+byteorder = "*"

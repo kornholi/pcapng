@@ -1,40 +1,55 @@
-#![feature(io)]
+#![feature(ip_addr)]
 
-use std::error::FromError;
+use std::convert::From;
 
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 
-use std::old_io::{Reader, BufReader, IoError};
-use std::old_io::net::ip::IpAddr;
+use std::io;
+use std::io::BufReader;
+use std::net::IpAddr;
+
+extern crate byteorder;
+
+use byteorder::{LittleEndian, ByteOrder, ReadBytesExt};
 
 #[derive(Debug)]
 pub enum Error {
-    Io(IoError),
+    UnexpectedEOF,
+    Io(io::Error),
     FormatError(FormatError)
 }
 
-#[derive(Debug, Copy)]
+#[derive(Debug, Clone)]
 pub enum FormatError {
     UnknownBlock(u32),
     UnknownOption(u16),
     Utf8Error(Utf8Error)
 }
 
-impl FromError<IoError> for Error {
-    fn from_error(err: IoError) -> Error {
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Error {
         Error::Io(err)
     }
 }
 
-impl FromError<FromUtf8Error> for Error {
-    fn from_error(err: FromUtf8Error) -> Error {
+impl From<byteorder::Error> for Error {
+    fn from(err: byteorder::Error) -> Error {
+        match err {
+            byteorder::Error::UnexpectedEOF => Error::UnexpectedEOF,
+            byteorder::Error::Io(io_err) => Error::Io(io_err)
+        }
+    }
+}
+
+impl From<FromUtf8Error> for Error {
+    fn from(err: FromUtf8Error) -> Error {
         Error::FormatError(FormatError::Utf8Error(err.utf8_error()))
     }
 }
 
-impl FromError<FormatError> for Error {
-    fn from_error(err: FormatError) -> Error {
+impl From<FormatError> for Error {
+    fn from(err: FormatError) -> Error {
         Error::FormatError(err)
     }
 }
@@ -215,49 +230,61 @@ fn dword_aligned(n: usize) -> usize {
     (n + 3) & !3
 }
 
-pub fn read_raw_block(r: &mut Reader) -> Result<(u32, Vec<u8>), IoError> {
-    let block_type = try!(r.read_le_u32());
+fn read_exact(r: &mut io::Read, n: usize) -> io::Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(n);
+    let mut i = 0;
 
-    let total_len = try!(r.read_le_u32()) as usize;
+    while i < n {
+        i += try!(r.read(&mut buf[i..]));
+    }
+
+    Ok(buf)
+}
+
+pub fn read_raw_block<BO: ByteOrder>(r: &mut io::Read) -> Result<(u32, Vec<u8>), io::Error> {
+    let block_type = try!(r.read_u32::<BO>());
+
+    let total_len = try!(r.read_u32::<BO>()) as usize;
     let data_len = total_len - 12; // 12 = type + 2*length
 
-    let mut data = try!(r.read_exact(dword_aligned(data_len)));
+    let mut data = try!(read_exact(r, dword_aligned(data_len)));
     data.truncate(data_len);
 
-    assert!(total_len == try!(r.read_le_u32()) as usize);
+    assert!(total_len == try!(r.read_u32::<BO>()) as usize);
 
     Ok((block_type, data))
 }
 
-fn read_option(r: &mut Reader) -> Result<(u16, Vec<u8>), IoError> {
-    let code = try!(r.read_le_u16());
-    let len = try!(r.read_le_u16()) as usize;
+fn read_option<BO: ByteOrder>(r: &mut io::Read) -> Result<(u16, Vec<u8>), io::Error> {
+    let code = try!(r.read_u16::<BO>());
+    let len = try!(r.read_u16::<BO>()) as usize;
 
-    let mut data = try!(r.read_exact(dword_aligned(len)));
+    let mut data = try!(read_exact(r, dword_aligned(len)));
     data.truncate(len);
 
     Ok((code, data))
 }
 
-pub fn read_block(r: &mut Reader) -> Result<Block, Error> {
+pub fn read_block(r: &mut io::Read) -> Result<Block, Error> {
     use Block::*;
+    type BO = LittleEndian;
 
-    let (block_type, data) = try!(read_raw_block(r));
-    let mut r = BufReader::new(&*data);
+    let (block_type, data) = try!(read_raw_block::<BO>(r));
+    let mut r = BufReader::new(&data[..]);
 
     let r = match block_type {
-        0x0A0D0D0A => SectionHeader(try!(SectionHeaderBlock::read(&mut r))),
-        1 => InterfaceDescription(try!(InterfaceDescriptionBlock::read(&mut r))),
-        5 => InterfaceStatistics(try!(InterfaceStatisticsBlock::read(&mut r))),
-        6 => EnhancedPacket(try!(EnhancedPacketBlock::read(&mut r))),
-        _ => return Err(FromError::from_error(FormatError::UnknownBlock(block_type)))
+        0x0A0D0D0A => SectionHeader(try!(SectionHeaderBlock::read::<BO>(&mut r))),
+        1 => InterfaceDescription(try!(InterfaceDescriptionBlock::read::<BO>(&mut r))),
+        5 => InterfaceStatistics(try!(InterfaceStatisticsBlock::read::<BO>(&mut r))),
+        6 => EnhancedPacket(try!(EnhancedPacketBlock::read::<BO>(&mut r))),
+        _ => return Err(From::from(FormatError::UnknownBlock(block_type)))
     };
 
     Ok(r)
 }
 
 pub struct BlockIter<'a> {
-    r: &'a mut (Reader + 'a)
+    r: &'a mut (io::Read + 'a)
 }
 
 pub struct PacketIter<'a> {
@@ -265,7 +292,7 @@ pub struct PacketIter<'a> {
 }
 
 pub struct SimpleReader<'a> {
-    r: &'a mut (Reader + 'a),
+    r: &'a mut (io::Read + 'a),
 
     interfaces: Vec<InterfaceDescriptionBlock>,
     if_offset: usize
@@ -282,7 +309,7 @@ impl<'a> Iterator for BlockIter<'a> {
     }
 }
 
-type IterPacket<'a> = (&'a InterfaceDescriptionBlock, EnhancedPacketBlock);
+pub type IterPacket<'a> = (&'a InterfaceDescriptionBlock, EnhancedPacketBlock);
 
 impl<'a> Iterator for PacketIter<'a> {
     type Item = IterPacket<'a>;
@@ -304,7 +331,7 @@ impl<'a> Iterator for PacketIter<'a> {
                     let iface = &self.r.interfaces[self.r.if_offset + ep.interface_id as usize];
                     unsafe {
                         // The interface description should live as long as
-                        // SimpleReader, so this should be safe.
+                        // SimpleBufReader, so this should be safe.
                         let iface = std::mem::transmute(iface);
                     
                         return Some((iface, ep))
@@ -319,7 +346,7 @@ impl<'a> Iterator for PacketIter<'a> {
 }
 
 impl<'a> SimpleReader<'a> {
-    pub fn new(r: &mut Reader) -> SimpleReader {
+    pub fn new(r: &mut io::Read) -> SimpleReader {
         SimpleReader { r: r, interfaces: Vec::new(), if_offset: 0}
     }
 
@@ -333,43 +360,44 @@ impl<'a> SimpleReader<'a> {
 }
 
 impl SectionHeaderBlock {
-    pub fn read(r: &mut BufReader) -> Result<SectionHeaderBlock, Error> {
-        let magic = try!(r.read_le_u32());
+    pub fn read<BO: ByteOrder>(r: &mut io::Read) -> Result<SectionHeaderBlock, Error> {
+        let magic = try!(r.read_u32::<BO>());
     
         assert!(magic == 0x1A2B3C4D, "unsupported endianness");
 
-        let major_version = try!(r.read_le_u16());
-        let minor_version = try!(r.read_le_u16());
-        let section_length = try!(r.read_le_u64());
+        let major_version = try!(r.read_u16::<BO>());
+        let minor_version = try!(r.read_u16::<BO>());
+        let section_length = try!(r.read_u64::<BO>());
 
         let mut options = Vec::new();
 
-        if !r.eof() {
-            loop {
-                use SectionHeaderOption::*;
+        loop {
+            use SectionHeaderOption::*;
 
-                let (code, data) = try!(read_option(r));
+            let (code, data) = match read_option::<BO>(r) {
+                Ok(x) => x,
+                Err(_) => break
+            };
 
-                let opt = match code {
-                    0 => break,
+            let opt = match code {
+                0 => break,
 
-                    1...4 => {
-                        let s = try!(String::from_utf8(data));
+                1...4 => {
+                    let s = try!(String::from_utf8(data));
 
-                        match code {
-                            1 => Comment(s),
-                            2 => Hardware(s),
-                            3 => OS(s),
-                            4 => UserApplication(s),
-                            _ => unreachable!()
-                        }
+                    match code {
+                        1 => Comment(s),
+                        2 => Hardware(s),
+                        3 => OS(s),
+                        4 => UserApplication(s),
+                        _ => unreachable!()
                     }
+                }
 
-                    _ => return Err(FromError::from_error(FormatError::UnknownOption(code)))
-                };
+                _ => return Err(From::from(FormatError::UnknownOption(code)))
+            };
 
-                options.push(opt);
-            }
+            options.push(opt);
         }
 
         Ok(SectionHeaderBlock {
@@ -384,51 +412,53 @@ impl SectionHeaderBlock {
 }
 
 impl InterfaceDescriptionBlock {
-    pub fn read(r: &mut BufReader) -> Result<InterfaceDescriptionBlock, Error> {
-        let link_type = try!(r.read_le_u16());
-        try!(r.read_le_u16()); // reserved
-        let snap_len = try!(r.read_le_u32());
+    pub fn read<BO: ByteOrder>(r: &mut io::Read) -> Result<InterfaceDescriptionBlock, Error> {
+        let link_type = try!(r.read_u16::<BO>());
+        try!(r.read_u16::<BO>()); // Reserved
+        let snap_len = try!(r.read_u32::<BO>());
 
         let mut options = Vec::new();
 
-        if !r.eof() {
-            loop {
-                use InterfaceDescriptionOption::*;
-                let (code, data) = try!(read_option(r));
+        loop {
+            use InterfaceDescriptionOption::*;
 
-                let mut d = &*data;
+            let (code, data) = match read_option::<BO>(r) {
+                Ok(x) => x,
+                Err(_) => break
+            };
 
-                let opt = match code {
-                    0 => break,
-                    1...3 | 12 => {
-                        let s = try!(String::from_utf8(data.clone()));
+            let mut d = &data[..];
 
-                        match code {
-                            1 => Comment(s),
-                            2 => Name(s),
-                            3 => Description(s),
-                            12 => OS(s),
-                            _ => unreachable!()
-                        }
+            let opt = match code {
+                0 => break,
+                1...3 | 12 => {
+                    let s = try!(String::from_utf8(data.clone()));
+
+                    match code {
+                        1 => Comment(s),
+                        2 => Name(s),
+                        3 => Description(s),
+                        12 => OS(s),
+                        _ => unreachable!()
                     }
+                }
 
-                    4 => {
-                        let ip = try!(d.read_le_u32());
-                        let mask = try!(d.read_le_u32());
+                4 => {
+                    let ip = try!(d.read_u32::<BO>());
+                    let mask = try!(d.read_u32::<BO>());
 
-                        Ipv4Addr(ip, mask)
-                    }
+                    Ipv4Addr(ip, mask)
+                }
 
-                    6 => MacAddr(try!(d.read_le_uint_n(6))),
-                    9 => TsResolution(try!(d.read_byte())),
+                6 => MacAddr(try!(d.read_uint::<BO>(6))),
+                9 => TsResolution(try!(d.read_u8())),
 
-                    _ => return Err(FromError::from_error(FormatError::UnknownOption(code)))
-                };
+                _ => return Err(From::from(FormatError::UnknownOption(code)))
+            };
 
-                options.push(opt);
-            }
+            options.push(opt);
         }
-    
+
         Ok(InterfaceDescriptionBlock {
             link_type: link_type,
             snap_len: snap_len,
@@ -438,39 +468,41 @@ impl InterfaceDescriptionBlock {
 }
 
 impl EnhancedPacketBlock {
-    pub fn read(r: &mut BufReader) -> Result<EnhancedPacketBlock, Error> {
-        let interface_id = try!(r.read_le_u32());
-        let ts = try!(r.read_le_u64());
-        let cap_len = try!(r.read_le_u32()) as usize;
-        let len = try!(r.read_le_u32());
+    pub fn read<BO: ByteOrder>(r: &mut io::Read) -> Result<EnhancedPacketBlock, Error> {
+        let interface_id = try!(r.read_u32::<BO>());
+        let ts = try!(r.read_u64::<BO>());
+        let cap_len = try!(r.read_u32::<BO>()) as usize;
+        let len = try!(r.read_u32::<BO>());
 
         let aligned_len = dword_aligned(cap_len);
 
-        let mut packet_data = try!(r.read_exact(aligned_len));
+        let mut packet_data = try!(read_exact(r, aligned_len));
         packet_data.truncate(cap_len);
 
         let mut options = Vec::new();
 
-        if !r.eof() {
-            loop {
-                use EnhancedPacketBlockOption::*;
-                let (code, data) = try!(read_option(r));
+        loop {
+            use EnhancedPacketBlockOption::*;
 
-                let opt = match code {
-                    0 => break,
-                    1 => {
-                        match String::from_utf8(data.clone()) {
-                            Ok(r) => Comment(r),
-                            Err(err) => return Err(FromError::from_error(err))
-                        }
+            let (code, data) = match read_option::<BO>(r) {
+                Ok(x) => x,
+                Err(_) => break
+            };
+
+            let opt = match code {
+                0 => break,
+                1 => {
+                    match String::from_utf8(data.clone()) {
+                        Ok(r) => Comment(r),
+                        Err(err) => return Err(From::from(err))
                     }
+                }
 
-                    // TODO: rest of the options
-                    _ => return Err(FromError::from_error(FormatError::UnknownOption(code)))
-                };
+                // TODO: rest of the options
+                _ => return Err(From::from(FormatError::UnknownOption(code)))
+            };
 
-                options.push(opt);
-            }
+            options.push(opt);
         }
 
         Ok(EnhancedPacketBlock {
@@ -484,46 +516,48 @@ impl EnhancedPacketBlock {
 }
 
 impl InterfaceStatisticsBlock {
-    pub fn read(r: &mut BufReader) -> Result<InterfaceStatisticsBlock, Error> {
-        let interface_id = try!(r.read_le_u32());
-        let ts = try!(r.read_le_u64());
+    pub fn read<BO: ByteOrder>(r: &mut io::Read) -> Result<InterfaceStatisticsBlock, Error> {
+        let interface_id = try!(r.read_u32::<BO>());
+        let ts = try!(r.read_u64::<BO>());
 
         let mut options = Vec::new();
 
-        if !r.eof() {
-            loop {
-                use InterfaceStatisticsOption::*;
-                let (code, data) = try!(read_option(r));
+        loop {
+            use InterfaceStatisticsOption::*;
 
-                let opt = match code {
-                    0 => break,
-                    1 => {
-                        match String::from_utf8(data.clone()) {
-                            Ok(r) => Comment(r),
-                            Err(err) => return Err(FromError::from_error(err))
-                        }
+            let (code, data) = match read_option::<BO>(r) {
+                Ok(x) => x,
+                Err(_) => break
+            };
+
+            let opt = match code {
+                0 => break,
+                1 => {
+                    match String::from_utf8(data.clone()) {
+                        Ok(r) => Comment(r),
+                        Err(err) => return Err(From::from(err))
                     }
+                }
 
-                    2...8 => {
-                        let data = try!((&*data).read_le_u64());
+                2...8 => {
+                    let data = try!((&*data).read_u64::<BO>());
 
-                        match code {
-                            2 => StartTime(data),
-                            3 => EndTime(data),
-                            4 => Received(data),
-                            5 => Dropped(data),
-                            6 => FilterAccepted(data),
-                            7 => OSDropped(data),
-                            8 => Delivered(data),
-                            _ => unreachable!()
-                        }
+                    match code {
+                        2 => StartTime(data),
+                        3 => EndTime(data),
+                        4 => Received(data),
+                        5 => Dropped(data),
+                        6 => FilterAccepted(data),
+                        7 => OSDropped(data),
+                        8 => Delivered(data),
+                        _ => unreachable!()
                     }
+                }
 
-                    _ => return Err(FromError::from_error(FormatError::UnknownOption(code)))
-                };
+                _ => return Err(From::from(FormatError::UnknownOption(code)))
+            };
 
-                options.push(opt);
-            }
+            options.push(opt);
         }
 
         Ok(InterfaceStatisticsBlock {
