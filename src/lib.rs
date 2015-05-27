@@ -232,8 +232,9 @@ fn dword_aligned(n: usize) -> usize {
 
 fn read_exact(r: &mut io::Read, n: usize) -> io::Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(n);
-    let mut i = 0;
+    unsafe { buf.set_len(n); }
 
+    let mut i = 0;
     while i < n {
         i += try!(r.read(&mut buf[i..]));
     }
