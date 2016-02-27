@@ -1,5 +1,3 @@
-#![feature(ip_addr)]
-
 use std::convert::From;
 
 use std::str::Utf8Error;
