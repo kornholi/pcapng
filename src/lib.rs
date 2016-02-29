@@ -13,7 +13,6 @@ use byteorder::{LittleEndian, ByteOrder, ReadBytesExt};
 
 #[derive(Debug)]
 pub enum Error {
-    UnexpectedEOF,
     Io(io::Error),
     FormatError(FormatError)
 }
@@ -28,15 +27,6 @@ pub enum FormatError {
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Error {
         Error::Io(err)
-    }
-}
-
-impl From<byteorder::Error> for Error {
-    fn from(err: byteorder::Error) -> Error {
-        match err {
-            byteorder::Error::UnexpectedEOF => Error::UnexpectedEOF,
-            byteorder::Error::Io(io_err) => Error::Io(io_err)
-        }
     }
 }
 
