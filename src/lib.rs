@@ -218,25 +218,14 @@ fn dword_aligned(n: usize) -> usize {
     (n + 3) & !3
 }
 
-fn read_exact(r: &mut io::Read, n: usize) -> io::Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(n);
-    unsafe { buf.set_len(n); }
-
-    let mut i = 0;
-    while i < n {
-        i += try!(r.read(&mut buf[i..]));
-    }
-
-    Ok(buf)
-}
-
-pub fn read_raw_block<BO: ByteOrder>(r: &mut io::Read) -> Result<(u32, Vec<u8>), io::Error> {
+pub fn read_raw_block<BO: ByteOrder>(r: &mut io::Read) -> io::Result<(u32, Vec<u8>)> {
     let block_type = try!(r.read_u32::<BO>());
 
     let total_len = try!(r.read_u32::<BO>()) as usize;
     let data_len = total_len - 12; // 12 = type + 2*length
 
-    let mut data = try!(read_exact(r, dword_aligned(data_len)));
+    let mut data = vec![0; dword_aligned(data_len)];
+    try!(r.read_exact(&mut data[..]));
     data.truncate(data_len);
 
     assert!(total_len == try!(r.read_u32::<BO>()) as usize);
@@ -244,11 +233,12 @@ pub fn read_raw_block<BO: ByteOrder>(r: &mut io::Read) -> Result<(u32, Vec<u8>),
     Ok((block_type, data))
 }
 
-fn read_option<BO: ByteOrder>(r: &mut io::Read) -> Result<(u16, Vec<u8>), io::Error> {
+fn read_option<BO: ByteOrder>(r: &mut io::Read) -> io::Result<(u16, Vec<u8>)> {
     let code = try!(r.read_u16::<BO>());
     let len = try!(r.read_u16::<BO>()) as usize;
 
-    let mut data = try!(read_exact(r, dword_aligned(len)));
+    let mut data = vec![0; dword_aligned(len)];
+    try!(r.read_exact(&mut data[..]));
     data.truncate(len);
 
     Ok((code, data))
@@ -465,7 +455,8 @@ impl EnhancedPacketBlock {
 
         let aligned_len = dword_aligned(cap_len);
 
-        let mut packet_data = try!(read_exact(r, aligned_len));
+        let mut packet_data = vec![0; aligned_len];
+        try!(r.read_exact(&mut packet_data[..]));
         packet_data.truncate(cap_len);
 
         let mut options = Vec::new();
