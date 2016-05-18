@@ -31,15 +31,6 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<byteorder::Error> for Error {
-    fn from(err: byteorder::Error) -> Error {
-        match err {
-            byteorder::Error::UnexpectedEOF => Error::UnexpectedEOF,
-            byteorder::Error::Io(io_err) => Error::Io(io_err)
-        }
-    }
-}
-
 impl From<FromUtf8Error> for Error {
     fn from(err: FromUtf8Error) -> Error {
         Error::FormatError(FormatError::Utf8Error(err.utf8_error()))
